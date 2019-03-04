@@ -77,18 +77,18 @@ def get_fp( mols ):
   if( args.fpType == 'MACCS' ) : 
     for x in  mols :
       if( x ):
-	z=Chem.MACCSkeys.GenMACCSKeys( x )
+        z=Chem.MACCSkeys.GenMACCSKeys(x)
         fps.append(z)
   if( args.fpType == 'Daylight' ) :
     for x in  mols :
       if( x ) :
-	z= FingerprintMols.FingerprintMol( x )
-	fps.append(z)
+        z= FingerprintMols.FingerprintMol( x )
+        fps.append(z)
   if (args.fpType == 'AP'):
     for x in mols:
       if (x):
         z=GetHashedAtomPairFingerprintAsBitVect( x, nBits=4096 )
-	fps.append(z)
+        fps.append(z)
   return fps
 
 
@@ -143,7 +143,7 @@ args = parser.parse_args()
 
 pool = None
 if( args.numWorkers > 1 ) :
-  print "init",args.numWorkers,"workers"
+  print("init "+str(args.numWorkers)+" workers")
   pool = Pool( processes = args.numWorkers )
 
 activesTrain = [ m for m in readMols( args.activeMolsTraining ) if m is not None ]
@@ -161,10 +161,10 @@ train_labels = [1]*len( activesTrainFP ) + [0]*len( inactivesTrainFP )
 test_data = activesTestFP + inactivesTestFP 
 test_labels = [1]*len( activesTestFP ) + [0]*len( inactivesTestFP )
 
-combT = zip( train_data, train_labels )
-combV = zip( test_data, test_labels )
-shuffle( combT )
-shuffle( combV )
+combT = list(zip( train_data, train_labels ))
+combV = list(zip( test_data, test_labels ))
+shuffle(combT )
+shuffle(combV)
 train_data, train_labels = zip( *combT )
 test_data, test_labels = zip( *combV )
 
@@ -179,14 +179,14 @@ iTest_iTrain_S = np.mean( [ np.mean( np.any( iTest_iTrain_D < t, axis=1 ) ) for 
 iTest_aTrain_S = np.mean( [ np.mean( np.any( iTest_aTrain_D < t, axis=1 ) ) for t in np.linspace( 0, 1.0, 50 ) ] )
 
 outFH = open( args.outFile, 'w' )
-print >>outFH, "#ActTrain=",len( activesTrainFP ), "#InactTrain=",len( inactivesTrainFP ),\
-    "#ActTest=",len( activesTestFP ), "#InactTest=", len( inactivesTestFP ),\
-    "knn1=", gen_eval( train_data, train_labels, test_data, test_labels, "knn1" ),\
-    "lr=", gen_eval( train_data, train_labels, test_data, test_labels, "lr" ),\
-    "rf=", gen_eval( train_data, train_labels, test_data, test_labels, "rf" ),\
-    "svm=", gen_eval( train_data, train_labels, test_data, test_labels, "svm" ),\
-    "AA-AI=",aTest_aTrain_S-aTest_iTrain_S,\
-    "II-IA=",iTest_iTrain_S-iTest_aTrain_S,\
-    "(AA-AI)+(II-IA)=",aTest_aTrain_S-aTest_iTrain_S+iTest_iTrain_S-iTest_aTrain_S
+outFH.write("#ActTrain= "+str(len( activesTrainFP ))+"\n#InactTrain= "+str(len( inactivesTrainFP ))+\
+    "\n#ActTest= "+str(len( activesTestFP ))+"\n#InactTest= "+str(len( inactivesTestFP))+\
+    "\nknn1= "+str(gen_eval( train_data, train_labels, test_data, test_labels, "knn1"))+\
+    "\nlr= "+str(gen_eval( train_data, train_labels, test_data, test_labels, "lr"))+\
+    "\nrf= "+str(gen_eval( train_data, train_labels, test_data, test_labels, "rf" ))+\
+    "\nsvm= "+str(gen_eval( train_data, train_labels, test_data, test_labels, "svm"))+\
+    "\nAA-AI= "+str(aTest_aTrain_S-aTest_iTrain_S)+\
+    "\nII-IA= "+str(iTest_iTrain_S-iTest_aTrain_S)+\
+    "\n(AA-AI)+(II-IA)= "+str(aTest_aTrain_S-aTest_iTrain_S+iTest_iTrain_S-iTest_aTrain_S)+"\n")
 outFH.close()
 

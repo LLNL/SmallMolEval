@@ -28,7 +28,7 @@ from scipy import stats
 from time import time, asctime, localtime, strftime
 from sklearn import svm
 import itertools
-import cPickle as pickle
+#import cPickle as pickle
 import gzip
 
 from rdkit.Chem.AtomPairs import Pairs
@@ -62,7 +62,7 @@ def readMols( file ) :
     else :
       mols = Chem.SmilesMolSupplier( file, delimiter=' ', titleLine=False ) 
   elif( fileExtension == ".mol2" ) :
-    print "mol2 file is currently not supported"
+    print("mol2 file is currently not supported")
     sys.exit( 1 )
     mols = Chem.MolFromMol2File( file ) 
   elif( fileExtension == ".sdf" ) : 
@@ -93,7 +93,7 @@ def get_fp( mols ):
   if( args.fpType == 'MACCS' ) : 
     for x in  mols :
       if( x ):
-	z=Chem.MACCSkeys.GenMACCSKeys( x )
+        z=Chem.MACCSkeys.GenMACCSKeys( x )
         fps.append(z)
   if (args.fpType == 'simple') :
     describer=MUVDescriptors()
@@ -104,14 +104,14 @@ def get_fp( mols ):
   if( args.fpType == 'Daylight' ) :
     for x in  mols :
       if( x ) :
-	z= FingerprintMols.FingerprintMol( x )
-	fps.append(z)
+        z= FingerprintMols.FingerprintMol( x )
+        fps.append(z)
   if (args.fpType == 'AP'):
     for x in mols:
       if (x):
         z=GetHashedAtomPairFingerprintAsBitVect( x, nBits=4096 )
         #z=Pairs.GetAtomPairFingerprint( x )
-	fps.append(z)
+        fps.append(z)
   return fps
 
 
@@ -231,34 +231,34 @@ if( args.statePickleFile is None or not os.path.exists( args.statePickleFile ) )
   
   activesFP = get_fp( actives ) 
   inactivesFP = get_fp( inactives ) 
-  
-  combinedA = zip( actives, activesFP )
-  combinedI = zip( inactives, inactivesFP )
-  
+ 
+  combinedA = list(zip( actives, activesFP ))
+  combinedI = list(zip( inactives, inactivesFP ))
+
   shuffle( combinedA )
   shuffle( combinedI )
-  
+
   actives, activesFP  = zip( *combinedA )
   inactives, inactivesFP  = zip( *combinedI )
-  
+
   actives = actives[:args.maxNumMols]
   inactives = inactives[:args.maxNumMols]
   activesFP = activesFP[:args.maxNumMols]
   inactivesFP = inactivesFP[:args.maxNumMols]
-  
-  print "read",len(actives),"actives and",len(inactives),"inactives"
 
-  print "calc aa_D_ref"
+  print("read "+str(len(actives))+" actives and "+str(len(inactives))+" inactives")
+
+  print("calc aa_D_ref")
   aa_D_ref = calcDistMat( activesFP, activesFP, 'jaccard' )
-  print "calc ii_D_ref"
+  print("calc ii_D_ref")
   ii_D_ref = calcDistMat( inactivesFP, inactivesFP, 'jaccard' )
-  print "calc ai_D_ref"
+  print("calc ai_D_ref")
   ai_D_ref = calcDistMat( activesFP, inactivesFP, 'jaccard' )
-  print "done"
+  print("done")
 
-  activeIndices = range( len( actives ) )
-  inactiveIndices = range( len( inactives ) )
-  
+  activeIndices = list(range( len( actives )) )
+  inactiveIndices = list(range( len( inactives ) ))
+ 
   splitActives = int( len( activeIndices)/args.trainingToValidationRatio )
   splitInactives = int( len( inactiveIndices)/args.trainingToValidationRatio )
   assert( splitActives > 0 and splitInactives > 0 )
@@ -275,14 +275,14 @@ else :
 # randomly select a population of CV sets
 POP_SIZE = POP_SIZE_FACTOR
 while( len( pop ) < POP_SIZE ) :
-  shuffle( activeIndices )
-  shuffle( inactiveIndices )
+  shuffle(activeIndices)
+  shuffle(inactiveIndices)
   pop.append( ( activeIndices[ :splitActives ], inactiveIndices[ :splitInactives ], activeIndices[ splitActives: ], inactiveIndices[ splitInactives: ] ) )
 
 while( iterCount < args.maxIter ) : 
   iterCount += 1
   
-  print "calculate objectives for the population"
+  print("calculate objectives for the population")
   objs = []
   if( args.numWorkers > 1 ) :
     objs = calcPopObjPool.map( calcPopObj, [ (cvSet, aa_D_ref, ii_D_ref, ai_D_ref) for cvSet in pop ] )
@@ -291,13 +291,14 @@ while( iterCount < args.maxIter ) :
       objs.append( calcPopObj( [cvSet, aa_D_ref, ii_D_ref, ai_D_ref] ) )
 
   # negeate the values if we are maximizing
-  combinedPop = sorted( zip( objs, pop ) )
-  if( combinedPop[ 0 ][ 0 ] < 0 ) :
-    objs = [ -i for i in objs ]
-    combinedPop = sorted( zip( objs, pop ) )
+  combinedPop = sorted( list(zip( objs, pop )) )
 
+  if( combinedPop[ 0 ][ 0 ] < 0 ) :
+    print('in negate')
+    objs = [ -i for i in objs ]
+    combinedPop = sorted( list(zip( objs, pop )) )
   # enforce some diversity so the CV sets would not all be too similar
-  print "remove similar sets"
+  print("remove similar sets")
   skipIndices = {}
   for i in range( len( combinedPop ) ) :
     if( i in skipIndices ) : continue
@@ -305,33 +306,45 @@ while( iterCount < args.maxIter ) :
     inactiveSetV = combinedPop[i][1][1] 
     activeSetT = combinedPop[i][1][2] 
     inactiveSetT = combinedPop[i][1][3] 
-    
+
+   #####################LOOKS LIKE SKIPINDICES WILL NEVER GET ASSIGNED ANYTHIN IF WORKERS == 1
+
     if( args.numWorkers > 1 ) :
       results = checkPopSimPool.map( checkPopSim, 
                                     [ (activeSetV,inactiveSetV,activeSetT,inactiveSetT,combinedPop[j]) 
                                      for j in range( i+1, len( combinedPop ) ) if j not in skipIndices ]) 
-      for rIdx, val in enumerate( results ) :
-        if( val ) : 
-          skipIndices[ rIdx ] = 1
-        else :
-          for j in range( i+1, len( combinedPop ) ) :
-            if( j in skipIndices ) : continue
-            val = checkPopSim( (activeSetV,inactiveSetV,activeSetT,inactiveSetT,combinedPop[j]) )
-            if( val ) : 
-              skipIndices[ rIdx ] = 1
+    else:
+      results=[]
+      for j in range(i+1,len(combinedPop)):
+        if j not in skipIndices:
+          results.append(checkPopSim([activeSetV,inactiveSetV,activeSetT,inactiveSetT,combinedPop[j]]))
+
+    for rIdx, val in enumerate( results ) :
+      if( val ) : 
+        skipIndices[ rIdx ] = 1
+      else :
+        for j in range( i+1, len( combinedPop ) ) :
+          if( j in skipIndices ) : continue
+          val = checkPopSim( (activeSetV,inactiveSetV,activeSetT,inactiveSetT,combinedPop[j]) )
+          if( val ) : 
+            skipIndices[ rIdx ] = 1
 
     numSkipped = len( [ x for x in skipIndices if x < i ] )
     if( i - numSkipped > NEXT_GEN_FACTOR ) : break
   
   # now, remove the similar entries
-  print "removing",min( len( skipIndices.keys() ), NEXT_GEN_FACTOR ),"similar sets"
-  for i in reversed( np.sort( skipIndices.keys() ) ):
-    del combinedPop[ i ] 
-    if( len( combinedPop ) <= NEXT_GEN_FACTOR ) : break
+  print("removing "+str(min( len( skipIndices.keys() ), NEXT_GEN_FACTOR ))+" similar sets")
+  # code added in case 0 removed
+  print(skipIndices.keys())
+  if(len(skipIndices.keys()) > 0):
+    #for i in reversed( np.sort( skipIndices.keys() ) ):
+    for i in sorted( skipIndices.keys(), reverse = True):
+      del combinedPop[ i ] 
+      if( len( combinedPop ) <= NEXT_GEN_FACTOR ) : break
   
   # select the top K sets
-  print "population size after similarity filter: ",len( combinedPop )
-  print "select the next generation"
+  print("population size after similarity filter: "+str(len( combinedPop )))
+  print("select the next generation")
   newPop = combinedPop[ :NEXT_GEN_FACTOR ]
   finalPop = combinedPop[ 0 ]
   
@@ -339,7 +352,7 @@ while( iterCount < args.maxIter ) :
   topPopObj = np.mean( [ x[0] for x in newPop ] )
   finalPopObj = finalPop[ 0 ]
  
-  print "iter=", iterCount,"fullPopObj=",round(fullPopObj,3),"topPopObj=",round(topPopObj,3),"finalPopObj=",round(finalPopObj,3),"minObj=",round(minObj,3)
+  print("iter= "+str(iterCount)+" fullPopObj= "+str(round(fullPopObj,3))+" topPopObj= ",str(round(topPopObj,3))+" finalPopObj= "+str(round(finalPopObj,3))+" minObj= "+str(round(minObj,3)))
 
   if( abs(finalPopObj) < abs(minObj) ) : 
     minObj = finalPopObj
@@ -357,17 +370,17 @@ while( iterCount < args.maxIter ) :
       break
   
   # breed 
-  print "breed"
+  print("breed")
   pop = []
   while( len( pop ) < POP_SIZE ) :
     # randomly choose a pair
     pair = random.sample( newPop, 2 )
   
     # for each subset of indices, select a new set from the union of indices for that subset
-    newActiveIndicesV = pair[0][1][0] + pair[1][1][0] 
-    newInactiveIndicesV = pair[0][1][1] + pair[1][1][1] 
-    newActiveIndicesT = pair[0][1][2] + pair[1][1][2]
-    newInactiveIndicesT = pair[0][1][3] + pair[1][1][3] 
+    newActiveIndicesV = list(pair[0][1][0]) + list(pair[1][1][0]) 
+    newInactiveIndicesV = list(pair[0][1][1]) + list(pair[1][1][1]) 
+    newActiveIndicesT = list(pair[0][1][2]) + list(pair[1][1][2])
+    newInactiveIndicesT = list(pair[0][1][3]) + list(pair[1][1][3]) 
 
     avSize = int( len( newActiveIndicesV )/2 ) 
     ivSize = int( len( newInactiveIndicesV )/2 ) 
@@ -424,20 +437,12 @@ while( iterCount < args.maxIter ) :
     if( np.random.rand() < ADD_PROB ) :
       itSize += 1 
     
-    avSamp = random.sample( newActiveIndicesV, min( len( newActiveIndicesV ), max( avSize, MIN_AV ) ) ) 
-    ivSamp = random.sample( newInactiveIndicesV, min( len( newInactiveIndicesV ), max( ivSize, MIN_IV ) ) )
-    atSamp = random.sample( newActiveIndicesT, min( len( newActiveIndicesT ), max( atSize, MIN_AT ) ) )
-    itSamp = random.sample( newInactiveIndicesT, min( len( newInactiveIndicesT ), max( itSize, MIN_IT ) ) )
+    avSamp = random.sample( list(newActiveIndicesV), min( len( newActiveIndicesV ), max( avSize, MIN_AV ) ) ) 
+    ivSamp = random.sample( list(newInactiveIndicesV), min( len( newInactiveIndicesV ), max( ivSize, MIN_IV ) ) )
+    atSamp = random.sample( list(newActiveIndicesT), min( len( newActiveIndicesT ), max( atSize, MIN_AT ) ) )
+    itSamp = random.sample( list(newInactiveIndicesT), min( len( newInactiveIndicesT ), max( itSize, MIN_IT ) ) )
  
     pop.append( ( avSamp, ivSamp, atSamp, itSamp ) ) 
 
 
-print "Done. Total running time: %.3f sec\n" % (time() - startTime)
-
-
-
-
-
-
-
-
+print(f'Done. Total running time: {time() - startTime:.3f} sec')
