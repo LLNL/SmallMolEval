@@ -28,8 +28,10 @@ from scipy import stats
 from time import time, asctime, localtime, strftime
 from sklearn import svm
 import itertools
-#import cPickle as pickle
+import pickle
 import gzip
+import logging
+logging.basicConfig(format='%(asctime)-15s %(message)s')
 
 from rdkit.Chem.AtomPairs import Pairs
 from rdkit.Chem.Fingerprints import FingerprintMols
@@ -50,6 +52,7 @@ MIN_AT = 30
 MIN_IT = 30
 FINAL_POP_OBJ = 0.01
 
+#*******************************************************************************************************************************************
 def readMols( file ) :
   fileName, fileExtension = os.path.splitext( file )
   mols = []
@@ -73,6 +76,7 @@ def readMols( file ) :
     raise Exception( "un-supported input file format: "+fileExtension + " . ")
   return mols
 
+#*******************************************************************************************************************************************
 def get_fp( mols ):
   fps=[]
   if( args.fpType == 'ECFP4' ) : 
@@ -115,9 +119,11 @@ def get_fp( mols ):
   return fps
 
 
+#*******************************************************************************************************************************************
 def Cdist( params ) :
   return cdist( params[0], params[1], params[2] ) 
 
+#*******************************************************************************************************************************************
 def calcDistMat( fp1, fp2, distType ) :
   if( args.numWorkers > 1 ) :
     interval, reminder = divmod( len(fp1), min( len(fp1), args.numWorkers-1 ) )
@@ -128,31 +134,26 @@ def calcDistMat( fp1, fp2, distType ) :
     return cdist( fp1, fp2, distType )
 
 
+#*******************************************************************************************************************************************
 def checkPopSim( params ) : 
-  activeSetV, inactiveSetV, activeSetT, inactiveSetT, combinedPopJ = params[:]
-  activeSetV_tmp = combinedPopJ[1][0]
-  inactiveSetV_tmp = combinedPopJ[1][1] 
-  activeSetT_tmp = combinedPopJ[1][2] 
-  inactiveSetT_tmp = combinedPopJ[1][3] 
-  
-  joinedActivesV = activeSetV + activeSetV_tmp
-  joinedInactivesV = inactiveSetV + inactiveSetV_tmp
-  joinedActivesT = activeSetT + activeSetT_tmp
-  joinedInactivesT = inactiveSetT + inactiveSetT_tmp
-  
-  overlapActivesV = len( set( [ x for x in joinedActivesV if joinedActivesV.count( x ) > 1 ] ) )
-  overlapInactivesV = len( set( [ x for x in joinedInactivesV if joinedInactivesV.count( x ) > 1 ] ) )
-  overlapActivesT = len( set( [ x for x in joinedActivesT if joinedActivesT.count( x ) > 1 ] ) )
-  overlapInactivesT = len( set( [ x for x in joinedInactivesT if joinedInactivesT.count( x ) > 1 ] ) )
-  
-  if( 1.0*overlapActivesV/len(activeSetV) > MAX_SET_OVERLAP_FRACTION or 
-      1.0*overlapInactivesV/len(inactiveSetV) > MAX_SET_OVERLAP_FRACTION or 
-      1.0*overlapActivesT/len(activeSetT) > MAX_SET_OVERLAP_FRACTION or 
-      1.0*overlapInactivesT/len(inactiveSetT) > MAX_SET_OVERLAP_FRACTION ) :
+  """
+  Compare index sets given by params[0:3] against the corresponding sets given by params[4] and return True if
+  any have more than a certain fraction of molecules in common.
+  """
+  combinedPopJ = params[4]
+  for i in range(4):
+    set1 = params[i]
+    set2 = set(combinedPopJ[1][i])
+    max_overlap = MAX_SET_OVERLAP_FRACTION * len(set1)
+    if len(set1 & set2) > max_overlap:
       return True
   return False
 
+#*******************************************************************************************************************************************
 def calcPopObj( params ) :
+  """
+  Compute the AVE bias objective function for the CV set given by params[0], based on the distance matrices in the remaining params
+  """
   cvSet, aa_D_ref, ii_D_ref, ai_D_ref = params[:]
   ia_D_ref = ai_D_ref.transpose()
   vaI, viI, taI, tiI = cvSet[:]
@@ -168,8 +169,10 @@ def calcPopObj( params ) :
   iTest_iTrain_S = np.mean( [ np.mean( np.any( iTest_iTrain_D < t, axis=1 ) ) for t in np.linspace( 0, 1.0, 50 ) ] )
   iTest_aTrain_S = np.mean( [ np.mean( np.any( iTest_aTrain_D < t, axis=1 ) ) for t in np.linspace( 0, 1.0, 50 ) ] )
 
-  return aTest_aTrain_S-aTest_iTrain_S + iTest_iTrain_S-iTest_aTrain_S 
+  #return aTest_aTrain_S-aTest_iTrain_S + iTest_iTrain_S-iTest_aTrain_S 
+  return abs(aTest_aTrain_S-aTest_iTrain_S + iTest_iTrain_S-iTest_aTrain_S)
 
+#*******************************************************************************************************************************************
 def writePop( pop, actives, inactives, iter ) :
   if( not os.path.exists( args.outDir ) ) : 
     os.makedirs( args.outDir )
@@ -200,20 +203,35 @@ def writePop( pop, actives, inactives, iter ) :
                      "_size_"+str(len(pop[1][2]))+"-"+str(len(pop[1][3]))+"-"+str(len(pop[1][0]))+"-"+str(len(pop[1][1])) ), "w" ).close()
 
 
+#*******************************************************************************************************************************************
+# start of executable code
+#*******************************************************************************************************************************************
+
+# TODO: Want to wrap the main executable code in a function so that it can be called from the DDM pipeline.
+# This means passing the following global variables as arguments to the functions defined above:
+#   args: get_fp, calcDistMat, writePop
+#   pool: calcDistMat
+
+
+# Read command line arguments
 parser = argparse.ArgumentParser( description='' )
 parser.add_argument( '-fpType', default="ECFP4", choices=['DayLight', 'ECFP4', 'ECFP6', 'ECFP12', 'AP','MACCS' ] )
-parser.add_argument( '-activeMols' , required=True )
-parser.add_argument( '-inactiveMols' , required=True )
+parser.add_argument( '-activeMols' , required=True, help="Input file (SMILES strings or SDF) for active molecules" )
+parser.add_argument( '-inactiveMols' , required=True, help="Input file (SMILES strings or SDF) for inactive molecules" )
 parser.add_argument( '-trainingToValidationRatio', default=5, type=int )
 parser.add_argument( '-outDir', default="." )
-parser.add_argument( '-numWorkers', default=1, type=int )
-parser.add_argument( '-statePickleFile' )
+parser.add_argument( '-numWorkers', default=1, type=int, help='Number of workers for each of 3 subprocess pools')
+parser.add_argument( '-statePickleFile', help="File where program variables will be saved; if it exists program state will be loaded from here" )
 parser.add_argument( '-maxIter', type=int, default=300 )
-parser.add_argument( '-maxNumMols', type=int, default=10000 )
+parser.add_argument( '-maxNumMols', type=int, default=10000, help="Use first maxNumMols molecules if smaller than input file sizes"  )
 args = parser.parse_args()
 
+# Set up logging
+log = logging.getLogger('ATOM')
+log.setLevel(logging.INFO)
 startTime = time()
 
+# Set up multiprocessing pools
 pool = None
 checkPopSimPool = None
 calcPopObjPool = None
@@ -222,6 +240,7 @@ if( args.numWorkers > 1 ) :
   checkPopSimPool = Pool( processes = args.numWorkers ) 
   calcPopObjPool = Pool( processes = args.numWorkers )
 
+# Initialize program state
 pop = []
 iterCount = 0
 minObj = None 
@@ -246,15 +265,15 @@ if( args.statePickleFile is None or not os.path.exists( args.statePickleFile ) )
   activesFP = activesFP[:args.maxNumMols]
   inactivesFP = inactivesFP[:args.maxNumMols]
 
-  print("read "+str(len(actives))+" actives and "+str(len(inactives))+" inactives")
+  log.info("read "+str(len(actives))+" actives and "+str(len(inactives))+" inactives")
 
-  print("calc aa_D_ref")
+  log.info("calc aa_D_ref")
   aa_D_ref = calcDistMat( activesFP, activesFP, 'jaccard' )
-  print("calc ii_D_ref")
+  log.info("calc ii_D_ref")
   ii_D_ref = calcDistMat( inactivesFP, inactivesFP, 'jaccard' )
-  print("calc ai_D_ref")
+  log.info("calc ai_D_ref")
   ai_D_ref = calcDistMat( activesFP, inactivesFP, 'jaccard' )
-  print("done")
+  log.info("done")
 
   activeIndices = list(range( len( actives )) )
   inactiveIndices = list(range( len( inactives ) ))
@@ -265,6 +284,7 @@ if( args.statePickleFile is None or not os.path.exists( args.statePickleFile ) )
   minObj = 99999
 
 else :
+  # Load state variables from previous run
   fh = None
   if( args.statePickleFile.endswith( ".gz" ) ) :
     fh = gzip.open( args.statePickleFile, "rb" )
@@ -282,7 +302,7 @@ while( len( pop ) < POP_SIZE ) :
 while( iterCount < args.maxIter ) : 
   iterCount += 1
   
-  print("calculate objectives for the population")
+  log.info("calculate objectives for the population")
   objs = []
   if( args.numWorkers > 1 ) :
     objs = calcPopObjPool.map( calcPopObj, [ (cvSet, aa_D_ref, ii_D_ref, ai_D_ref) for cvSet in pop ] )
@@ -290,61 +310,49 @@ while( iterCount < args.maxIter ) :
     for cvSet in pop :
       objs.append( calcPopObj( [cvSet, aa_D_ref, ii_D_ref, ai_D_ref] ) )
 
-  # negeate the values if we are maximizing
+  # Order the list of CV sets by AVE score
   combinedPop = sorted( list(zip( objs, pop )) )
+  num_pops = len(combinedPop)
 
-  if( combinedPop[ 0 ][ 0 ] < 0 ) :
-    print('in negate')
-    objs = [ -i for i in objs ]
-    combinedPop = sorted( list(zip( objs, pop )) )
   # enforce some diversity so the CV sets would not all be too similar
-  print("remove similar sets")
-  skipIndices = {}
-  for i in range( len( combinedPop ) ) :
+  log.info("remove similar sets")
+  skipIndices = set()
+  for i in range( num_pops ) :
     if( i in skipIndices ) : continue
-    activeSetV = combinedPop[i][1][0]
-    inactiveSetV = combinedPop[i][1][1] 
-    activeSetT = combinedPop[i][1][2] 
-    inactiveSetT = combinedPop[i][1][3] 
+    activeSetV = set(combinedPop[i][1][0])
+    inactiveSetV = set(combinedPop[i][1][1])
+    activeSetT = set(combinedPop[i][1][2])
+    inactiveSetT = set(combinedPop[i][1][3])
 
-   #####################LOOKS LIKE SKIPINDICES WILL NEVER GET ASSIGNED ANYTHIN IF WORKERS == 1
-
+    indices_to_check = sorted(set(range(i+1, num_pops)) - skipIndices)
     if( args.numWorkers > 1 ) :
       results = checkPopSimPool.map( checkPopSim, 
                                     [ (activeSetV,inactiveSetV,activeSetT,inactiveSetT,combinedPop[j]) 
-                                     for j in range( i+1, len( combinedPop ) ) if j not in skipIndices ]) 
+                                     for j in indices_to_check ]) 
     else:
-      results=[]
-      for j in range(i+1,len(combinedPop)):
-        if j not in skipIndices:
-          results.append(checkPopSim([activeSetV,inactiveSetV,activeSetT,inactiveSetT,combinedPop[j]]))
+      results = [checkPopSim([activeSetV,inactiveSetV,activeSetT,inactiveSetT,combinedPop[j]]) for j in indices_to_check]
 
-    for rIdx, val in enumerate( results ) :
+    for j, val in zip(indices_to_check, results):
       if( val ) : 
-        skipIndices[ rIdx ] = 1
-      else :
-        for j in range( i+1, len( combinedPop ) ) :
-          if( j in skipIndices ) : continue
-          val = checkPopSim( (activeSetV,inactiveSetV,activeSetT,inactiveSetT,combinedPop[j]) )
-          if( val ) : 
-            skipIndices[ rIdx ] = 1
+        skipIndices.add(j)
 
-    numSkipped = len( [ x for x in skipIndices if x < i ] )
-    if( i - numSkipped > NEXT_GEN_FACTOR ) : break
+    numSkipped = len(skipIndices)
+    if( num_pops - numSkipped < NEXT_GEN_FACTOR ) : break
   
   # now, remove the similar entries
-  print("removing "+str(min( len( skipIndices.keys() ), NEXT_GEN_FACTOR ))+" similar sets")
+  log.info("Found %d CV sets with > 0.8 overlap with better scoring sets" % numSkipped)
+  num_remove = min(numSkipped, num_pops-NEXT_GEN_FACTOR)
+  log.info("Removing %d similar sets with indices:" % num_remove)
   # code added in case 0 removed
-  print(skipIndices.keys())
-  if(len(skipIndices.keys()) > 0):
-    #for i in reversed( np.sort( skipIndices.keys() ) ):
-    for i in sorted( skipIndices.keys(), reverse = True):
+  remove_indices = sorted(skipIndices, reverse=True)[:num_remove]
+  if(num_remove > 0):
+    log.info(",".join(['%d' % i for i in remove_indices]))
+    for i in remove_indices:
       del combinedPop[ i ] 
-      if( len( combinedPop ) <= NEXT_GEN_FACTOR ) : break
   
   # select the top K sets
-  print("population size after similarity filter: "+str(len( combinedPop )))
-  print("select the next generation")
+  log.info("population size after similarity filter: "+str(len( combinedPop )))
+  log.info("select the next generation")
   newPop = combinedPop[ :NEXT_GEN_FACTOR ]
   finalPop = combinedPop[ 0 ]
   
@@ -352,8 +360,8 @@ while( iterCount < args.maxIter ) :
   topPopObj = np.mean( [ x[0] for x in newPop ] )
   finalPopObj = finalPop[ 0 ]
  
-  print("iter= "+str(iterCount)+" fullPopObj= "+str(round(fullPopObj,3))+" topPopObj= ",str(round(topPopObj,3))+" finalPopObj= "+str(round(finalPopObj,3))+" minObj= "+str(round(minObj,3)))
-
+  log.info("iter = %d  fullPopObj = %.3f  topPopObj = %.3f  finalPopObj = %.3f" % (iterCount, fullPopObj, topPopObj, finalPopObj))
+   
   if( abs(finalPopObj) < abs(minObj) ) : 
     minObj = finalPopObj
 
@@ -370,7 +378,7 @@ while( iterCount < args.maxIter ) :
       break
   
   # breed 
-  print("breed")
+  log.info("breed")
   pop = []
   while( len( pop ) < POP_SIZE ) :
     # randomly choose a pair
@@ -445,4 +453,5 @@ while( iterCount < args.maxIter ) :
     pop.append( ( avSamp, ivSamp, atSamp, itSamp ) ) 
 
 
-print(f'Done. Total running time: {time() - startTime:.3f} sec')
+endTime = time()
+log.info("Done. Total running time = %f sec" % (endTime - startTime))
